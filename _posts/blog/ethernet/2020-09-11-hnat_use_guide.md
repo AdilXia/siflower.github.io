@@ -19,9 +19,11 @@ mermaid: true
 
 本项目适用于对网络以及Linux内核有基本了解的人员。
 
+
 ## 2 开发与测试环境
 
 需要带hnat模块的芯片的开发板环境或者FPGA环境，镜像需要选中hnat模块驱动。
+
 
 ## 3 相关背景
 
@@ -31,13 +33,15 @@ mermaid: true
 
 - hnat是硬件网络地址转换的缩写，顾名思义，就是使用硬件进行数据的nat转换。当一条tcp或udp连接建立之后，系统会通过网络驱动接口，将该连接所需的nat转换信息下发到hnat模块，从而由hnat模块完成后续数据包的nat转换，从而达到千兆级的转换速度。
 
+
 ## 4 功能概述
 
 本文主要描述了HNAT硬件上的结构位置，实现的功能和性能，对外开放的接口，对接调试方法和测试补充等.
 
+
 ## 5 硬件结构
 
-HNAT整个子系统位于GMAC模块中，在芯片中的位置如下:
+HNAT整个子系统位于GMAC模块中，在芯片中的位置如下:  
 ![jekyll_exec](/assets/images/hnat_img/hnat_strcuture.png)
 
 
@@ -45,10 +49,10 @@ HNAT整个子系统位于GMAC模块中，在芯片中的位置如下:
 
 HNAT子系统主要针对GMAC外挂千兆交换芯片的应用场景，实现LAN和WAN通信报文的NAT转换，并对转换后的报文做转发处理，发往HOST或者GE_Switch，注意本子系统只对符合ETH II，802.3，VLAN，PPPOE格式的，并且协议为UDP、TCP的IPV4报文做NAT处理，其它报文上送HOST处理；
 
-支持的数据流向如下:
+支持的数据流向如下:  
 ![jekyll_exec](/assets/images/hnat_img/hnat_flow.png)
 
-- LAN（GE）<-->HOST ②<-->③<-->④ 
+- LAN（GE）<-->HOST ②<-->③<-->④
 - LAN（GE）<-->WAN（GE） ②<-->③<-->①  需要做SNAT和DNAT
 - LAN（GE）<-->WLAN ②<-->③<-->④<-->⑥
 - WAN（GE）<-->HOST ①<-->③<-->④
@@ -59,23 +63,26 @@ HNAT子系统主要针对GMAC外挂千兆交换芯片的应用场景，实现LAN
 * 支持以太网加速
   * hnat模块可以将转换后的数据包上送host或重新发出，通常情况下hnat在处理完来自switch的数据包之后（wan/lan），会转发回switch（lan/wan），这就是以太网部分的加速功能。
 * 支持wifi加速功能
-  * 根据配置，hnat模块同样可以对来自wifi侧的数据包进行snat加速，将wifi的数据包发送到wan。将wan->wifi的数据包dnat转换后从switch上送到host，再由host发送给wifi，这样可以hnat模块就可以实现对wifi的加速，提高wifi的性能。
+  * 根据配置，hnat模块同样可以对来自wifi侧的数据包进行snat加速，将wifi的数据包发送到wan。将wan->wifi的数据包dnat转换后从switch上送到host，再由host发送给wifi，这样可以hnat模块就可以实现对wifi的加速，提高wifi的性能。  
+  **注意:**  
+  HNAT在支持以太网到WIFI的硬件加速时，通过指定VLAN ID进行WIFI到以太网和以太网到以太网的流的区分，因此部分VLAN已经被reserve给WIFI使用，具体reserve的VLAN ID区间为4000~4015，驱动已经做了屏蔽，用户设置此区间VLAN ID为无效区间．
 * 支持不同HNAT模式；
-  * hnat模块通过设置可以支持不同模式的nat，包括Basic NAT、Symmetric NAT、Restricted cone NAT、Port-Restricted cone NAT、Full cone NAT，根据不同的应用场景可以选择不同的nat模式。 
+  * hnat模块通过设置可以支持不同模式的nat，包括Basic NAT、Symmetric NAT、Restricted cone NAT、Port-Restricted cone NAT、Full cone NAT，根据不同的应用场景可以选择不同的nat模式。
 * 支持ip分片数据包；
   * hnat模块可以支持对ip分片的数据包进行nat处理，可以处理顺序/乱序情况下的多分片数据包（2分片及以上）。ip分片是为了处理ip数据包长度大于网卡mtu的情况，其中tcp协议具有分片功能，因此tcp数据包一般没有ip分片的情况，ip分片主要在udp数据包中出现。
 * 支持最大1024条NAPT表和512条DIP表以及128条MAC表；
   * HNAT子系统最大支持1024条NAPT表项，512个不同的destination IP以及128条不同的MAC表项，由于NAPT和DIP数据采用hash压缩算法存储，因此由于hash冲突，存在较小的概率情况下，实际能支持的条目数小于1024条NAPT表项或512条destination IP表项。
 * 根据配置信息进行nat转换
   * hnat模块可以识别ETH II、VLAN、PPPOE、VLAN+PPPOE四种类型的数据包，从而可以支持不同场景下的应用。根据驱动配置的信息，hnat可以根据原数据包中的ip/port等信息判断是否需要进行SNAT或DNAT。当需要进行SNAT时，hnat模块会修改原数据包中sip、sport、dmac、smac信息，当需要进行DNAT时，hnat模块会修改原数据包中dip、dport、dmac、smac信息，从而与协议栈处理结果相同，可以做到正常通信与加速功能。
- 
+
+
 ## 7 性能测试
 
 HNAT性能测试包含日常Release版本的IxChariot/Iperf性能测试以及打流仪2544性能标定的测试，对应版本的测试报告见redmine#[9045](http://redmine.siflower.cn/redmine/issues/9045)，摘取部分测试结果如下：
-|　测试项　| 未加速 | hnat加速 | 
-| ------- | ------ | ----- | 
-| lan-wan吞吐 | 275Mbps | 932Mbps | 
-| wan-lan吞吐 | 203Mbps | 936Mbps | 
+|　测试项　| 未加速 | hnat加速 |
+| ------- | ------ | ----- |
+| lan-wan吞吐 | 275Mbps | 932Mbps |
+| wan-lan吞吐 | 203Mbps | 936Mbps |
 
 
 ## 8 对接接口
@@ -86,7 +93,7 @@ HNAT性能测试包含日常Release版本的IxChariot/Iperf性能测试以及打
 
 在Openwrt系统中可以通过修改firewall配置文件来使能/关闭HNAT，详细配置如下：
 ```
-root@OpenWrt:/# cat /etc/config/firewall 
+root@OpenWrt:/# cat /etc/config/firewall
 
 config defaults
         option syn_flood '1'
@@ -97,7 +104,7 @@ config defaults
         option flow_offloading_hw '1'
         ...
 ```
-其中flow_offloading/flow_offloading_hw对应hnat配置规则，将其置'0'表示关闭，默认为'1'表示开启．
+其中flow_offloading/flow_offloading_hw对应hnat配置规则，将其置'0'表示关闭，默认为'1'表示开启．  
 flow_offloading是Linux内核netfilter模块的配置选项，Netfilter是Linux内核中的一个软件框架，不仅有nat的功能，也具备数据包内容修改、以及数据包过滤等防火墙功能，通过控制Linux内核netfilter的模块，来实现网络数据包的处理和转发．
 
 ### 8.1.2 LAN口IP发生变化时，HNAT配置自动更新
@@ -105,18 +112,27 @@ flow_offloading是Linux内核netfilter模块的配置选项，Netfilter是Linux�
 LAN口IP被用做hnat判断报文是否需要转发（内网到外网）的依据，也是在DNAT时用做替换报文的sip．因此在LAN口IP发生变化时，HNAT配置信息需要同步更新．这在Openwrt中通过hotplud.d监测iface接口状态变化来实现．在检测到LAN口IP发生变化时，hotplud.d中的监测脚本会调用HNAT驱动提供的debugfs接口将信息更新到驱动中去.
 详细对应的hotplud.d检测脚本位置如下:
 ```
-root@OpenWrt:/# ls /etc/hotplug.d/iface/05-updatehnatlan 
+root@OpenWrt:/# ls /etc/hotplug.d/iface/05-updatehnatlan
 /etc/hotplug.d/iface/05-updatehnatlan
 ```
+**脚本说明:**  
+在/etc/hotplug.d/iface/05-updatehnatlan脚本中，每当network启动或关闭时，所有interface up和down的信息都会传入/etc/hotplug.d/iface路径下的脚本中，以参数INTERFACE（包括lan、wan等）和ACTION（包括up和down）表示。通过这些信息筛选出lan和guset，并且在up时读取它们的ip和mask信息传入debug节点，down时通过debug节点删除信息，即可实现lan ip实时更新。05-updatehnatlan共支持7个lan和1个guest lan的更新。
 
-### 8.1.3 WAN口IP发生变化时，HNAT配置自动更新
+### 8.1.3 WAN口NETMASK发生变化时，HNAT配置自动更新
 
-WAN口IP与NETMASK被用做hnat判断报文是否需要转发（内网到外网）的依据．因此WAN口IP发生变化时，HNAT配置信息也需要同步更新．这在Openwrt中通过hotplud.d监测iface接口状态变化来实现．在检测到WAN口IP发生变化时，hotplud.d中的监测脚本会调用HNAT驱动提供的debugfs接口将信息更新到驱动中去.
+WAN口NETMASK被用做hnat判断报文是否需要转发（内网到外网）的依据．因此WAN口IP发生变化时，HNAT配置信息也需要同步更新．这在Openwrt中通过hotplud.d监测iface接口状态变化来实现．在检测到WAN口IP发生变化时，hotplud.d中的监测脚本会调用HNAT驱动提供的debugfs接口将信息更新到驱动中去.
 详细对应的hotplud.d检测脚本位置如下:
 ```
-root@OpenWrt:/# ls /etc/hotplug.d/iface/80-updatewan 
+root@OpenWrt:/# ls /etc/hotplug.d/iface/80-updatewan
 /etc/hotplug.d/iface/80-updatewan
 ```
+**脚本说明:**  
+与05-updatehnatlan同理，当INTERFACE为wan或wwan时，ACTION为up时，用ubus指令获取到当前wan口masklen，如果非0则进行更新，如果为masklen=32则减一，用masklen=31进行更新。
+
+
+### 8.2 HNAT驱动对接接口
+
+#### 8.2.1 HNAT驱动flow offload规则添加/删除接口
 
 ### 8.2 HNAT驱动对接接口
 
@@ -147,6 +163,51 @@ int sgmac_ndo_flow_offload(enum flow_offload_type type,
 }
 ```
 
+#### 8.2.2 LAN IP发生变化时，HNAT配置更新接口
+
+在sf_hnat.c中，用HWNAT_REG16_CSR到HWNAT_REG23_CSR共8组寄存器存放最多8组lan ip的值，HWNAT_REG30_CSR和HWNAT_REG31_CSR共2组寄存器存放对应ip的masklen。通过debugfs节点提供了lan ip+masklan查看/添加/删除方法，详细使用方法如下。
+
+- 查看所有lan ip和mask信息：
+
+  ```
+  echo getlan > /sys/kernel/debug/hnat_debug
+  ```
+
+- 在第i个寄存器添加lan信息(i表示寄存器编号，lanhex maskhex为 IP 和mask的十六进制数，echo时会添加0x头)。例如将ip为192.168.4.110，mask为255.255.255.0的lan信息更新到第二个寄存器：
+
+  ```
+  echo addlan $i 0x$lanhex 0x$maskhex > /sys/kernel/debug/hnat_debug
+  e.g.
+  echo addlan 2 0xc0a8046e 0xffffff00 > /sys/kernel/debug/hnat_debug
+  ```
+
+- 删除第i个寄存器存放的lan信息，例如删除第二个寄存器的lan信息：
+
+  ```
+  echo dellan $i > /sys/kernel/debug/hnat_debug 删除第i个寄存器存放的lan信息
+  e.g.
+  echo dellan 2 > /sys/kernel/debug/hnat_debug
+  ```
+
+#### 8.2.2 WAN NETMASK发生变化时，HNAT配置更新接口
+
+WAN口NETMASK被用做hnat判断报文是否需要转发（内网到外网）的依据，因此hnat中还需要知道当前wan口的masklen，并用phnat_priv结构体的wan_masklen元素储存。通过debugfs节点提供了wan masklan查看/更新方法，详细使用方法如下。
+
+- 查看当前wanmasklen
+
+  ```
+  echo getwanmask > /sys/kernel/debug/hnat_debug
+  ```
+
+- 更新wan口的masklen
+
+  ```
+  echo updatewanmask $wan_masklen > /sys/kernel/debug/hnat_debug
+  e.g.
+  echo updatewanmask 24 > /sys/kernel/debug/hnat_debug
+  ```
+
+
 ### 8.3 HNAT内核对接接口
 
 在Linux内核4.14版本以后就支持硬件nat功能，其主要通过Netfilter框架实现．Netfilter框架中制定了五个数据包的钩子点，分别是PRE_ROUTING、INPUT、OUTPUT、FORWARD与POST_ROUTING。由于路由器主要功能是转发，因此路由器中数据包主要经过PRE_ROUTING、FORWARD与POST_ROUTING，输入与输出（INPUT与OUTPUT）较少使用。flowoffload规则配置在FORWARD中，当数据包经过FORWARD点时，符合规则的数据包相关的nat信息就会被配置到驱动中。
@@ -176,17 +237,17 @@ Siflower通过debugfs节点暴露出去了一套私有Debugfs接口，专门用�
   echo writel [addr] [data] >  /sys/kernel/debug/hnat_debug
   echo tabread [tab_no] [depth] >  /sys/kernel/debug/hnat_debug
   echo tabwrite [tab_no] [depth] [data(5)] >  /sys/kernel/debug/hnat_debug
-  intro: dump all entry of table and crc table, 1 for napt, 0 for arp 
+  intro: dump all entry of table and crc table, 1 for napt, 0 for arp
   echo dump <napt/arp> >  /sys/kernel/debug/hnat_debug
   echo stat  >  /sys/kernel/debug/hnat_debug
-  intro: add/del lan ip and netmask to register incording to register_num 
+  intro: add/del lan ip and netmask to register incording to register_num
   echo log mode  >  /sys/kernel/debug/hnat_debug
   intro: mode:0 for disbable hnat log, mode:1 for enable hnat log
   echo addlan [register_num] [addr] [netmask] >  /sys/kernel/debug/hnat_debug
   demo: echo addlan 2 0xc0a80400 0xffffff00 > /sys/kernel/debug/hnat_debug
   echo dellan [register_num] >  /sys/kernel/debug/hnat_debug
   demo: echo dellan 2 > /sys/kernel/debug/hnat_debug
-  intro: show lan ip and netmask in all 8 registers 
+  intro: show lan ip and netmask in all 8 registers
   echo getlan >  /sys/kernel/debug/hnat_debug
   intro: update wan masklen to hnat and get wanmasklen
   echo updatewanmask [wan_masklen] > /sys/kernel/debug/hnat_debug
@@ -195,24 +256,24 @@ Siflower通过debugfs节点暴露出去了一套私有Debugfs接口，专门用�
   ```
 
 展示几个最主要的debugsf接口使用方法如下:
-- 开启hnat debug log
-  hnat debug log主要打印hnat entry添加/删除时候的信息以及辅助判断的诊断信息.
+- 开启hnat debug log  
+  hnat debug log主要打印hnat entry添加/删除时候的信息以及辅助判断的诊断信息.  
   开启命令:  
-  ```echo log 1 > /sys/kernel/debug/hnat_debug```
+  ```echo log 1 > /sys/kernel/debug/hnat_debug```  
   关闭命令:  
-  ```echo log ０ > /sys/kernel/debug/hnat_debug```
+  ```echo log ０ > /sys/kernel/debug/hnat_debug```  
   结果展示如下:
   ```
-    root@OpenWrt:/# [97156.424722] hnat offload ADD type=0 
-    [97156.428381] !!!!!!!!!!!!!!!!!!!!!flow_offload flags=0x1 timeout=0x0 l4 proto= 0x6 l3proto=0x2 
+    root@OpenWrt:/# [97156.424722] hnat offload ADD type=0
+    [97156.428381] !!!!!!!!!!!!!!!!!!!!!flow_offload flags=0x1 timeout=0x0 l4 proto= 0x6 l3proto=0x2
     [97156.437176] ORIGINAL: src:[192.168.4.246:52418] -> dest:[45.124.126.250:443]
     [97156.444255] REPLY: src:[45.124.126.250:443] -> dest:[10.0.5.19:52418]
     [97156.450773] src=========
     [97156.453336] ==================hw path flags=0x1 vlan_proto=0x0 vlan_id=0x0 pppoe_sid=0x0 devname=wlan1
-    [97156.462752]  src_mac=10:16:88:60:de:b1 dst_mac=92:71:ee:11:ca:e4  
+    [97156.462752]  src_mac=10:16:88:60:de:b1 dst_mac=92:71:ee:11:ca:e4
     [97156.469038] dest=========
     [97156.471691] ==================hw path flags=0x3 vlan_proto=0x81 vlan_id=0x2 pppoe_sid=0x0 devname=eth0
-    [97156.481100]  src_mac=10:16:88:60:de:b2 dst_mac=44:1a:fa:8c:fc:33  
+    [97156.481100]  src_mac=10:16:88:60:de:b2 dst_mac=44:1a:fa:8c:fc:33
     [97156.487413] [hnat notice]find wifi ndev  exist, index 6 ndev 86e0c000
     [97156.494236] [hnat notice]sf_hnat_search_vlan search success index 0 is_add 1 vlan_id 4006
     [97156.502526] [hnat notice]sf_hnat_search_vlan search success index 1 is_add 1 vlan_id 2
@@ -222,19 +283,19 @@ Siflower通过debugfs节点暴露出去了一套私有Debugfs接口，专门用�
     [97156.529904] [hnat notice]sf_hnat_search_dip search success index 1, ref_count 206
     [98086.143033] [hnat notice]sf_hnat_search_napt_by_pflow search success index 206
     [98086.150347] [hnat notice]del INAT hash index 1
-    [98086.150347]  
+    [98086.150347]
     [98086.150364] [hnat notice]del ENAT hash index 0
-    [98086.150364]  
+    [98086.150364]
     [98086.156501] >>>>>>>>hnat delete entry success!!!<<<<<<<<<
   ```
 
-- 读取hnat转换计数
+- 读取hnat转换计数  
   读取hnat SNAT和DNAT报文计数以及dump当前hnat部分寄存器值．
   命令:  
-  ```echo stat > /sys/kernel/debug/hnat_debug```
+  ```echo stat > /sys/kernel/debug/hnat_debug```  
   结果展示如下:
   ```
-    root@OpenWrt:/# echo stat > sys/kernel/debug/hnat_debug 
+    root@OpenWrt:/# echo stat > sys/kernel/debug/hnat_debug
     [99013.647334] napt full count 0 udp aging count 0 napt hash full 0 dip hash full 0
     [99013.654895] CSR REGISTERS START:
     [99013.658154] addr 0x4000:data 0x000d5550  addr 0x4004:data 0x0240004f  addr 0x4008:data 0x00000011  addr 0x400c:data 0x00400000
@@ -255,37 +316,37 @@ Siflower通过debugfs节点暴露出去了一套私有Debugfs接口，专门用�
     [99013.804146] addr 0x4180:data 0x00000000  addr 0x4184:data 0x00000000  addr 0x4188:data 0x00000000  addr 0x418c:data 0x00000000
     [99013.815745] addr 0x4190:data 0x00000000  addr 0x4194:data 0x00000099  addr 0x4198:data 0x00000000  addr 0x419c:data 0x00000000
     [99013.827324] COUNTER REGISTERS END:
-    [99013.842488]  GMAC reciv all 3192 pkts 
+    [99013.842488]  GMAC reciv all 3192 pkts
     [99013.846274]  rx 0 pkts need to snat
     [99013.849772]  rx 884 pkts need to dnat
     [99013.853610]  tx 30 pkts need to snat
     [99013.857239]  0 pkts are hit to GMAC
     [99013.860737]  host send 329 pkts to hnat
     [99013.864723] ===============RX=============
-    [99013.868866] rx_enter_sof_cnt        3192                , rx_enter_eof_cnt         3192                
-    [99013.878412] rx_2host_frame_sof_cnt  3192                , rx_2host_frame_eof_cnt   3192                
-    [99013.888005] rx_enter_drop_cnt       0                   , rx2tx_data_frame_cnt     0                   
-    [99013.897560] rx_enat_cnt             0                   , rx_inat_cnt              884                 
-    [99013.907173] rx2tx2host_cnt          0                   , rx2tx_drop_cnt           153                 
+    [99013.868866] rx_enter_sof_cnt        3192                , rx_enter_eof_cnt         3192
+    [99013.878412] rx_2host_frame_sof_cnt  3192                , rx_2host_frame_eof_cnt   3192
+    [99013.888005] rx_enter_drop_cnt       0                   , rx2tx_data_frame_cnt     0
+    [99013.897560] rx_enat_cnt             0                   , rx_inat_cnt              884
+    [99013.907173] rx2tx2host_cnt          0                   , rx2tx_drop_cnt           153
     [99013.916745] ===============TX=============
-    [99013.920892] tx_sof_frame_cnt        329                 , tx_eof_frame_cnt         329                 
-    [99013.930508] tx_exit_sof_cnt         329                 , tx_exit_eof_cnt          329                 
-    [99013.940132] tx_receive_rx_frame_cnt 0                   , tx_nohits_frame_cnt      14                  
-    [99013.949713] Hnat_rcv_status_cnt     329                 , Hnat_tx_status_cnt       0                   
-    [99013.959303] Hnat_rcv_txack_cnt      329                 , Hnat_gen_rxack_cnt       0                   
-    [99013.968899] Hnat2mtl_ack_cnt        329                 , Mtl_2hnat_rdyn_cnt       329                 
-    [99013.978454] Timeout_eof_cnt         0                   , Tx_enat_cnt              30                  
+    [99013.920892] tx_sof_frame_cnt        329                 , tx_eof_frame_cnt         329
+    [99013.930508] tx_exit_sof_cnt         329                 , tx_exit_eof_cnt          329
+    [99013.940132] tx_receive_rx_frame_cnt 0                   , tx_nohits_frame_cnt      14
+    [99013.949713] Hnat_rcv_status_cnt     329                 , Hnat_tx_status_cnt       0
+    [99013.959303] Hnat_rcv_txack_cnt      329                 , Hnat_gen_rxack_cnt       0
+    [99013.968899] Hnat2mtl_ack_cnt        329                 , Mtl_2hnat_rdyn_cnt       329
+    [99013.978454] Timeout_eof_cnt         0                   , Tx_enat_cnt              30
     [99013.988015] =============ERROR============
-    [99013.992324] rx2tx_errpkt_cnt        0                   , rx_total_err_cnt         0                   
-    [99014.001881] rx_gmii_err_cnt         0                   , rx_crc_err_cnt           0                   
-    [99014.011501] rx_length_err_cnt       0                   , rx_iphdr_err_cnt         0                   
+    [99013.992324] rx2tx_errpkt_cnt        0                   , rx_total_err_cnt         0
+    [99014.001881] rx_gmii_err_cnt         0                   , rx_crc_err_cnt           0
+    [99014.011501] rx_length_err_cnt       0                   , rx_iphdr_err_cnt         0
     [99014.020956] rx_payload_err_cnt      0
   ```
 
-- dump实际设置到寄存器表项中的内容
-  dump flowoffload entry实际设置到hant table寄存器中的值，主要用于检测debug entry设置是否正确．
-  命令：　　
-  ```echo dump 1 > /sys/kernel/debug/hnat_debug```
+- dump实际设置到寄存器表项中的内容  
+  dump flowoffload entry实际设置到hant table寄存器中的值，主要用于检测debug entry设置是否正确．  
+  命令：  
+  ```echo dump 1 > /sys/kernel/debug/hnat_debug```  
   结果展示如下:
   ```
     root@OpenWrt:/# echo dump 1 > sys/kernel/debug/hnat_debug
@@ -293,9 +354,9 @@ Siflower通过debugfs节点暴露出去了一套私有Debugfs接口，专门用�
     [  508.158571] ####napt key, napt_index 0
     [  508.162342] sf_hnat_dump_napt_key===========start flow 0x872bfd00
     [  508.162360] src:[192.168.4.152:44116] -> dest:[192.168.100.100:5001]
-    [  508.174969] smac b0:83:fe:ac:8e:91 vlanid 1 
+    [  508.174969] smac b0:83:fe:ac:8e:91 vlanid 1
     [  508.174969]  router src  mac 10:16:88:78:71:ea
-    [  508.183760] dmac 44:1a:fa:8c:fc:33  vlanid 2 
+    [  508.183760] dmac 44:1a:fa:8c:fc:33  vlanid 2
     [  508.183760]  router dest mac 10:16:88:78:71:eb
     [  508.192691] router:[10.0.5.31:44116]
     [  508.196312] pppoe sid  0x0  proto 1 cur_ppoe_en 0
@@ -350,7 +411,7 @@ HNAT系统级方案测试主要针对带有HNAT模块芯片的开发板上进行
 - LAN侧增/删 默认VLAN；
 - 多条流测试；
 - Burst测试中比例带宽测试；
-- 性能测试中延时/抖动测试；  
+- 性能测试中延时/抖动测试；
 
 详细测试结果见redmine#[9045](http://redmine.siflower.cn/redmine/issues/9045).
 
@@ -367,52 +428,56 @@ HNAT系统级方案测试主要针对带有HNAT模块芯片的开发板上进行
 
 **问题一： Windows PC UDP跑流时hnat转换失败；**
 
-**现象：** 
+**现象：**  
 Linux PC进行UDP打流能达到1000M速率，Windows PC UDP打流只有200Mbps
 
-**根因：**
+**根因：**  
 Windows PC发送UDP报文时，其IPv4头flags中没有Don't Fragment标志位，导致hnat认为此报文为分片报文，从而在未开启分片功能情况下认为不需要进行hnat转换，而Linux PC有，所以fpga测试抓取报文时没有发现该问题；
 
-**解决：**
+**解决：**  
 1. hnat默认开启分片，并修改分片缓存老化定时寄存器0x10806064和0x1080606c，由0x4d00调整为0x2000，让非分片报文在分片功能开启情况下能快速发出；
 2. tcp报文不受此问题影响；
 
 
 **问题二： hant lan2wan打流压力测试偶现gmac dma卡住；**
 
-**现象：**
+**现象：**  
 lan2wan千兆打流压力测试偶现gmac dma卡住，系统无法继续工作；
 
-**根因：**
+**根因：**  
 通过读寄存器发现hnat tx_fifo中有数据，tx_info_fifo无数据，gmac tx fifo无数据，tx_info_fifo和tx_fifo的反压阈值设置的不匹配导致tx info fifo出现了丢报文情况，从而导致发送卡死反压dma无法继续发送；
 
-**解决：**
+**解决：**  
 将tx_fifo将满阈值由200改为100，这样可以保证在最小包的情况下不会出现tx_info_fifo已满依然有数据进来的情况，修改后拷机ok；
+
 
 **问题三：WIFI和以太网同时进行hnat转换时gmac dma卡住**
 
-**现象：**
+**现象：**  
 gmac压力拷机测试，wlan看腾讯短视频，lan wan进行iperf 100M tcp打流测试，100s内，系统日志可以看到 tx transmit timeout日志，此时tx dma已经不再搬运数据。
 
-**根因：**
+**根因：**  
 1. 通过读寄存器发现查表模块的tx_out_buf出现overflow情况，这样查表结果丢失导致tx_fifo、tx_info_fifo和查表中tx_out_buf信息对应不起来；
 2. 当tx_info_fifo有需要serch的信息传递给modify时，modify会取读取查表tx_out_buf信息，由于结果丢失，导致modify获取不到查询结果信息，从而使整个发送通路卡住。
 
-**解决：**
+**解决：**  
 1. tx_out_buf深度16，每3个地址存放一个报文的查询结果，这样最大可以缓存5条报文的查表结果；测试结果见redmine#[9045](http://redmine.siflower.cn/redmine/issues/9045)
 2. 查表模块中的路径延时为32拍，最多可以缓存4条64B报文；
 3. 通过分析调整tx_out_buf发压阈值，由6改为2，这样当tx_out_buf起反压时，在立刻反压入口buf的同时可以吸收查表路径上的4条报文，这样就不会出现丢查询结果的情况；
 4. 修改后拷机测试通过。
 
+
 **问题四：测试仪打流小包在70%负载以上时出现丢包**
 
-**现象：**
+**现象：**  
 测试仪压力测试，64B和88B小包在70%以上负载的情况下出现丢包的问题。
 
-**根因：**
+**根因：**  
 1. 该问题和问题一类似；
 2. 测试仪发出的UDP非分片报文ip头中的flag为0，hnat把该报文当做了分片报文进入了分片报文处理流程，对于128B以下的小包，目前分片缓存老化定时器设置的0x2000偏大不合适；
-解决：将分片缓存老化定时寄存器0x10806064和0x1080606c的值调整到0x1500，即43us后，不再出现丢包现象。
+
+**解决：**  
+将分片缓存老化定时寄存器0x10806064和0x1080606c的值调整到0x1500，即43us后，不再出现丢包现象。
 
 
 ## 11 项目引用
